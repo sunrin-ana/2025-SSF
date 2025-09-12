@@ -1,0 +1,118 @@
+name: PR Comment Commands
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  format:
+    if: >
+      startsWith(github.event.comment.body, '/format') &&
+      github.event.issue.pull_request != null &&
+      !contains(github.event.comment.body, '[!NOTE]')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v3
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Set up Python 3.x
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install black
+        run: pip install black
+
+      - name: Run black
+        run: black .
+
+      - name: Get PR branch name
+        id: get_pr_branch
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('branch', pr.data.head.ref);
+
+      - name: Commit & Push if changed
+        env:
+          PR_BRANCH: ${{ steps.get_pr_branch.outputs.branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "chore: format code with black"
+            git push origin HEAD:${PR_BRANCH}
+          else
+            echo "No changes to commit."
+          fi
+
+      - name: Comment on PR
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+                body: "> [!NOTE]\n> 코드 포매팅이 완료되었어요."
+            })
+
+  review:
+    if: >
+      startsWith(github.event.comment.body, '/review') &&
+      github.event.issue.pull_request != null &&
+      !contains(github.event.comment.body, '[!NOTE]')
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Label PR as "review required"
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ["status: review required"]
+            })
+      - name: Request reviewers
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const pr = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            const submitter = pr.data.head.user.login;
+            const reviewers = ["norhu1130", "janghanul090801"].filter(r => r !== submitter);
+            if (reviewers.length > 0) {
+              await github.rest.pulls.requestReviewers({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.issue.number,
+                reviewers
+              });
+            }

@@ -1,0 +1,66 @@
+name: PR Status - Review Outcome
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  handle-review-outcome:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Handle review outcomes
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+
+            const labelInProgress   = "status: in progress";
+            const labelReviewReq    = "status: review required";
+            const labelChangeReq    = "status: change required";
+            const labelWaitingMerge = "status: waiting merge";
+
+            const labelsToRemove = [
+              labelInProgress,
+              labelReviewReq,
+              labelChangeReq,
+              labelWaitingMerge
+            ];
+
+            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            for (const labelName of labelsToRemove) {
+              if (currentLabels.some(l => l.name === labelName)) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: labelName
+                }).catch(err => {
+                  if (err.status !== 404) throw err;
+                });
+              }
+            }
+
+            if (context.payload.review.state === "approved") {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: [labelWaitingMerge]
+              });
+            } else if (context.payload.review.state === "changes_requested") {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                labels: [labelChangeReq]
+              });
+            }

@@ -1,0 +1,55 @@
+name: PR Status - When Merged
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  handle-merge:
+    # PR이 closed 되었을 때, merged 여부를 검사하여 merged=true인 경우에만 실행
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Update status to done
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const prNumber = context.payload.pull_request.number;
+
+            const labelsToRemove = [
+              "status: in progress",
+              "status: review required",
+              "status: change required",
+              "status: waiting merge"
+            ];
+
+            const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            for (const labelName of labelsToRemove) {
+              if (currentLabels.some(l => l.name === labelName)) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  name: labelName
+                }).catch(err => {
+                  if (err.status !== 404) throw err;
+                });
+              }
+            }
+
+            // 병합이 완료된 PR에 "status: done" 라벨을 부착
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ["status: done"]
+            });

@@ -1,0 +1,68 @@
+name: Black Formatter Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  black-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get commit messages
+        id: commits
+        run: |
+          messages=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json commits --jq '.commits[].message')
+          if echo "$messages" | grep -q "chore: format code with black"; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Set up Python 3.x
+        if: steps.commits.outputs.skip == 'false'
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install black
+        if: steps.commits.outputs.skip == 'false'
+        run: pip install black
+
+      - name: Run black --check
+        if: steps.commits.outputs.skip == 'false'
+        id: black-check
+        run: |
+          black . --check
+        continue-on-error: true
+
+      - name: Comment on PR (success)
+        if: steps.commits.outputs.skip == 'false' && steps.black-check.outcome == 'success'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "> [!NOTE]\n> 🎉 Black 포매팅 검사가 성공적으로 완료되었어요.\n`/review`로 리뷰를 요청하실 수 있어요."
+            })
+
+      - name: Comment on PR (failure)
+        if: steps.commits.outputs.skip == 'false' && steps.black-check.outcome == 'failure'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "> [!WARNING]\n> 😢 코드 포매팅이 필요해요.\n`black .` 명령어로 코드를 포매팅하거나 `/format` 명령어를 사용해 주세요."
+            })

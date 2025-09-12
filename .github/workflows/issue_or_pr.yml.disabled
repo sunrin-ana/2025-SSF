@@ -1,0 +1,40 @@
+name: Issue or PR Label
+
+on:
+  pull_request:
+    types: [opened]
+  issues:
+    types: [opened]
+
+jobs:
+  add-label:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Check if issue or PR is opened
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "issues" ]]; then
+            echo "type=issue" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "type=pull_request" >> $GITHUB_OUTPUT
+          else
+            echo "type=unknown" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Add label to issue or PR
+        if: steps.check.outputs.type == 'issue' || steps.check.outputs.type == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GH_TOKEN }}
+          script: |
+            const label = steps.check.outputs.type === 'issue' ? 'type: issue' : 'type: pull request';
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [label]
+            });
